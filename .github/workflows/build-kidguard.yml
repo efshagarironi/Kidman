@@ -1,0 +1,592 @@
+name: Build KidGuard APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Generate and Build KidGuard
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+
+      - name: Setup Gradle 8.9
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Create Android project
+        shell: bash
+        run: |
+          set -e
+
+          mkdir -p app/src/main/java/com/kidguard
+          mkdir -p app/src/main/res/values
+          mkdir -p app/src/main/res/xml
+
+          cat > settings.gradle.kts <<'EOF'
+          pluginManagement {
+              repositories {
+                  google()
+                  mavenCentral()
+                  gradlePluginPortal()
+              }
+          }
+
+          dependencyResolutionManagement {
+              repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
+              repositories {
+                  google()
+                  mavenCentral()
+              }
+          }
+
+          rootProject.name = "KidGuard"
+          include(":app")
+          EOF
+
+          cat > build.gradle.kts <<'EOF'
+          plugins {
+              id("com.android.application") version "8.7.3" apply false
+              id("org.jetbrains.kotlin.android") version "2.0.21" apply false
+          }
+          EOF
+
+          cat > gradle.properties <<'EOF'
+          org.gradle.jvmargs=-Xmx2048m -Dfile.encoding=UTF-8
+          android.useAndroidX=true
+          kotlin.code.style=official
+          EOF
+
+          cat > app/build.gradle.kts <<'EOF'
+          plugins {
+              id("com.android.application")
+              id("org.jetbrains.kotlin.android")
+          }
+
+          android {
+              namespace = "com.kidguard"
+              compileSdk = 35
+
+              defaultConfig {
+                  applicationId = "com.kidguard"
+                  minSdk = 26
+                  targetSdk = 35
+                  versionCode = 1
+                  versionName = "1.0.0"
+              }
+
+              buildTypes {
+                  release {
+                      isMinifyEnabled = false
+                  }
+              }
+
+              compileOptions {
+                  sourceCompatibility = JavaVersion.VERSION_17
+                  targetCompatibility = JavaVersion.VERSION_17
+              }
+
+              kotlinOptions {
+                  jvmTarget = "17"
+              }
+          }
+
+          dependencies {
+              implementation("androidx.core:core-ktx:1.15.0")
+              implementation("androidx.appcompat:appcompat:1.7.0")
+              implementation("com.google.android.material:material:1.12.0")
+          }
+          EOF
+
+          cat > app/src/main/res/values/strings.xml <<'EOF'
+          <resources>
+              <string name="app_name">KidGuard</string>
+              <string name="admin_description">
+                  KidGuard parental control administrator
+              </string>
+              <string name="accessibility_description">
+                  KidGuard parental control service
+              </string>
+          </resources>
+          EOF
+
+          cat > app/src/main/res/values/themes.xml <<'EOF'
+          <resources>
+              <style name="Theme.KidGuard"
+                  parent="Theme.Material3.DayNight.NoActionBar">
+                  <item name="android:fontFamily">sans</item>
+              </style>
+          </resources>
+          EOF
+
+          cat > app/src/main/res/xml/device_admin.xml <<'EOF'
+          <device-admin xmlns:android="http://schemas.android.com/apk/res/android">
+              <uses-policies>
+                  <force-lock />
+                  <disable-camera />
+              </uses-policies>
+          </device-admin>
+          EOF
+
+          cat > app/src/main/res/xml/accessibility_service.xml <<'EOF'
+          <accessibility-service
+              xmlns:android="http://schemas.android.com/apk/res/android"
+              android:accessibilityEventTypes="typeWindowStateChanged|typeWindowContentChanged"
+              android:accessibilityFeedbackType="feedbackGeneric"
+              android:notificationTimeout="100"
+              android:canRetrieveWindowContent="true"
+              android:description="@string/accessibility_description"
+              android:accessibilityFlags="flagReportViewIds|flagRetrieveInteractiveWindows" />
+          EOF
+
+          cat > app/src/main/AndroidManifest.xml <<'EOF'
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+              <uses-permission android:name="android.permission.PACKAGE_USAGE_STATS" />
+              <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+              <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+              <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" />
+
+              <application
+                  android:allowBackup="false"
+                  android:label="@string/app_name"
+                  android:supportsRtl="true"
+                  android:theme="@style/Theme.KidGuard">
+
+                  <activity
+                      android:name=".MainActivity"
+                      android:exported="true">
+
+                      <intent-filter>
+                          <action android:name="android.intent.action.MAIN" />
+                          <category android:name="android.intent.category.LAUNCHER" />
+                      </intent-filter>
+
+                  </activity>
+
+                  <receiver
+                      android:name=".AdminReceiver"
+                      android:exported="true"
+                      android:permission="android.permission.BIND_DEVICE_ADMIN">
+
+                      <meta-data
+                          android:name="android.app.device_admin"
+                          android:resource="@xml/device_admin" />
+
+                      <intent-filter>
+                          <action android:name="android.app.action.DEVICE_ADMIN_ENABLED" />
+                      </intent-filter>
+
+                  </receiver>
+
+                  <service
+                      android:name=".GuardAccessibilityService"
+                      android:exported="false"
+                      android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
+
+                      <intent-filter>
+                          <action android:name="android.accessibilityservice.AccessibilityService" />
+                      </intent-filter>
+
+                      <meta-data
+                          android:name="android.accessibilityservice"
+                          android:resource="@xml/accessibility_service" />
+
+                  </service>
+
+                  <receiver
+                      android:name=".BootReceiver"
+                      android:exported="true">
+
+                      <intent-filter>
+                          <action android:name="android.intent.action.BOOT_COMPLETED" />
+                      </intent-filter>
+
+                  </receiver>
+
+              </application>
+
+          </manifest>
+          EOF
+
+          cat > app/src/main/java/com/kidguard/AdminReceiver.kt <<'EOF'
+          package com.kidguard
+
+          import android.app.admin.DeviceAdminReceiver
+
+          class AdminReceiver : DeviceAdminReceiver()
+          EOF
+
+          cat > app/src/main/java/com/kidguard/BootReceiver.kt <<'EOF'
+          package com.kidguard
+
+          import android.content.BroadcastReceiver
+          import android.content.Context
+          import android.content.Intent
+
+          class BootReceiver : BroadcastReceiver() {
+
+              override fun onReceive(
+                  context: Context,
+                  intent: Intent
+              ) {
+                  if (intent.action == Intent.ACTION_BOOT_COMPLETED) {
+                      // KidGuard startup hook.
+                  }
+              }
+          }
+          EOF
+
+          cat > app/src/main/java/com/kidguard/PolicyStore.kt <<'EOF'
+          package com.kidguard
+
+          import android.content.Context
+
+          object PolicyStore {
+
+              private const val PREFS = "kidguard_policy"
+
+              fun blockedApps(context: Context): Set<String> {
+                  return context
+                      .getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                      .getStringSet("blocked_apps", emptySet())
+                      ?: emptySet()
+              }
+
+              fun blockedDomains(context: Context): Set<String> {
+                  return context
+                      .getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                      .getStringSet("blocked_domains", emptySet())
+                      ?: emptySet()
+              }
+
+              fun setBlockedApps(
+                  context: Context,
+                  packages: Set<String>
+              ) {
+                  context
+                      .getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                      .edit()
+                      .putStringSet("blocked_apps", packages)
+                      .apply()
+              }
+
+              fun setBlockedDomains(
+                  context: Context,
+                  domains: Set<String>
+              ) {
+                  context
+                      .getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+                      .edit()
+                      .putStringSet("blocked_domains", domains)
+                      .apply()
+              }
+          }
+          EOF
+
+          cat > app/src/main/java/com/kidguard/GuardAccessibilityService.kt <<'EOF'
+          package com.kidguard
+
+          import android.accessibilityservice.AccessibilityService
+          import android.view.accessibility.AccessibilityEvent
+          import android.view.accessibility.AccessibilityNodeInfo
+
+          class GuardAccessibilityService :
+              AccessibilityService() {
+
+              private val browsers = setOf(
+                  "com.android.chrome",
+                  "org.mozilla.firefox",
+                  "com.microsoft.emmx",
+                  "com.brave.browser"
+              )
+
+              override fun onAccessibilityEvent(
+                  event: AccessibilityEvent?
+              ) {
+                  event ?: return
+
+                  val packageName =
+                      event.packageName?.toString() ?: return
+
+                  if (
+                      PolicyStore
+                          .blockedApps(this)
+                          .contains(packageName)
+                  ) {
+                      performGlobalAction(
+                          GLOBAL_ACTION_HOME
+                      )
+                      return
+                  }
+
+                  if (packageName in browsers) {
+
+                      val pageText =
+                          readNode(rootInActiveWindow)
+                              .lowercase()
+
+                      val blocked =
+                          PolicyStore
+                              .blockedDomains(this)
+
+                      if (
+                          blocked.any {
+                              pageText.contains(
+                                  it.lowercase()
+                              )
+                          }
+                      ) {
+                          performGlobalAction(
+                              GLOBAL_ACTION_HOME
+                          )
+                      }
+                  }
+
+                  // Google Play
+                  if (
+                      packageName ==
+                      "com.android.vending"
+                  ) {
+                      performGlobalAction(
+                          GLOBAL_ACTION_HOME
+                      )
+                  }
+              }
+
+              private fun readNode(
+                  node: AccessibilityNodeInfo?
+              ): String {
+
+                  if (node == null) return ""
+
+                  val result =
+                      StringBuilder()
+
+                  node.text?.let {
+                      result.append(it)
+                      result.append(' ')
+                  }
+
+                  node.contentDescription?.let {
+                      result.append(it)
+                      result.append(' ')
+                  }
+
+                  for (i in 0 until node.childCount) {
+                      result.append(
+                          readNode(node.getChild(i))
+                      )
+                  }
+
+                  return result.toString()
+              }
+
+              override fun onInterrupt() = Unit
+          }
+          EOF
+
+          cat > app/src/main/java/com/kidguard/MainActivity.kt <<'EOF'
+          package com.kidguard
+
+          import android.app.Activity
+          import android.app.admin.DevicePolicyManager
+          import android.content.ComponentName
+          import android.content.Intent
+          import android.os.Bundle
+          import android.provider.Settings
+          import android.widget.Button
+          import android.widget.LinearLayout
+          import android.widget.TextView
+          import android.widget.Toast
+
+          class MainActivity : Activity() {
+
+              private lateinit var dpm: DevicePolicyManager
+              private lateinit var admin: ComponentName
+
+              override fun onCreate(
+                  savedInstanceState: Bundle?
+              ) {
+                  super.onCreate(savedInstanceState)
+
+                  dpm =
+                      getSystemService(
+                          DevicePolicyManager::class.java
+                      )
+
+                  admin =
+                      ComponentName(
+                          this,
+                          AdminReceiver::class.java
+                      )
+
+                  val layout =
+                      LinearLayout(this)
+
+                  layout.orientation =
+                      LinearLayout.VERTICAL
+
+                  layout.setPadding(
+                      32,
+                      48,
+                      32,
+                      32
+                  )
+
+                  val title =
+                      TextView(this)
+
+                  title.text =
+                      "KidGuard\nکنترل والدین"
+
+                  title.textSize = 28f
+
+                  layout.addView(title)
+
+                  addButton(
+                      layout,
+                      "فعال‌سازی Accessibility"
+                  ) {
+                      startActivity(
+                          Intent(
+                              Settings.ACTION_ACCESSIBILITY_SETTINGS
+                          )
+                      )
+                  }
+
+                  addButton(
+                      layout,
+                      "فعال‌سازی Usage Access"
+                  ) {
+                      startActivity(
+                          Intent(
+                              Settings.ACTION_USAGE_ACCESS_SETTINGS
+                          )
+                      )
+                  }
+
+                  addButton(
+                      layout,
+                      "Device Admin"
+                  ) {
+                      startActivity(
+                          Intent(
+                              Settings.ACTION_SECURITY_SETTINGS
+                          )
+                      )
+                  }
+
+                  addButton(
+                      layout,
+                      "اعمال محدودیت‌های پایه"
+                  ) {
+                      applyRestrictions()
+                  }
+
+                  setContentView(layout)
+              }
+
+              private fun addButton(
+                  layout: LinearLayout,
+                  text: String,
+                  action: () -> Unit
+              ) {
+                  val button =
+                      Button(this)
+
+                  button.text = text
+
+                  button.setOnClickListener {
+                      action()
+                  }
+
+                  layout.addView(button)
+              }
+
+              private fun applyRestrictions() {
+
+                  if (!dpm.isAdminActive(admin)) {
+
+                      Toast.makeText(
+                          this,
+                          "ابتدا Device Admin را فعال کنید.",
+                          Toast.LENGTH_LONG
+                      ).show()
+
+                      return
+                  }
+
+                  try {
+
+                      dpm.addUserRestriction(
+                          admin,
+                          android.os.UserManager
+                              .DISALLOW_INSTALL_UNKNOWN_SOURCES
+                      )
+
+                      dpm.addUserRestriction(
+                          admin,
+                          android.os.UserManager
+                              .DISALLOW_UNINSTALL_APPS
+                      )
+
+                      Toast.makeText(
+                          this,
+                          "محدودیت‌ها اعمال شد.",
+                          Toast.LENGTH_LONG
+                      ).show()
+
+                  } catch (
+                      e: SecurityException
+                  ) {
+
+                      Toast.makeText(
+                          this,
+                          "برای کنترل کامل باید Device Owner باشید.",
+                          Toast.LENGTH_LONG
+                      ).show()
+                  }
+              }
+          }
+          EOF
+
+      - name: Build APK
+        run: gradle assembleDebug --stacktrace
+
+      - name: Verify APK
+        shell: bash
+        run: |
+          set -e
+          APK=$(find app/build/outputs/apk/debug -name "*.apk" | head -n 1)
+
+          if [ -z "$APK" ]; then
+            echo "APK was not generated."
+            exit 1
+          fi
+
+          echo "APK generated:"
+          echo "$APK"
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: KidGuard-APK
+          path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
