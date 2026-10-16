@@ -7,7 +7,7 @@ on:
       - main
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build:
@@ -19,11 +19,10 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Setup Java 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: '17'
-          cache: gradle
 
       - name: Setup Gradle 8.9
         uses: gradle/actions/setup-gradle@v4
@@ -117,19 +116,14 @@ jobs:
           cat > app/src/main/res/values/strings.xml <<'EOF'
           <resources>
               <string name="app_name">KidGuard</string>
-              <string name="admin_description">
-                  KidGuard parental control administrator
-              </string>
-              <string name="accessibility_description">
-                  KidGuard parental control service
-              </string>
+              <string name="admin_description">KidGuard parental control administrator</string>
+              <string name="accessibility_description">KidGuard parental control service</string>
           </resources>
           EOF
 
           cat > app/src/main/res/values/themes.xml <<'EOF'
           <resources>
-              <style name="Theme.KidGuard"
-                  parent="Theme.Material3.DayNight.NoActionBar">
+              <style name="Theme.KidGuard" parent="Theme.Material3.DayNight.NoActionBar">
                   <item name="android:fontFamily">sans</item>
               </style>
           </resources>
@@ -241,11 +235,7 @@ jobs:
           import android.content.Intent
 
           class BootReceiver : BroadcastReceiver() {
-
-              override fun onReceive(
-                  context: Context,
-                  intent: Intent
-              ) {
+              override fun onReceive(context: Context, intent: Intent) {
                   if (intent.action == Intent.ACTION_BOOT_COMPLETED) {
                       // KidGuard startup hook.
                   }
@@ -266,6 +256,7 @@ jobs:
                   return context
                       .getSharedPreferences(PREFS, Context.MODE_PRIVATE)
                       .getStringSet("blocked_apps", emptySet())
+                      ?.toSet()
                       ?: emptySet()
               }
 
@@ -273,6 +264,7 @@ jobs:
                   return context
                       .getSharedPreferences(PREFS, Context.MODE_PRIVATE)
                       .getStringSet("blocked_domains", emptySet())
+                      ?.toSet()
                       ?: emptySet()
               }
 
@@ -307,8 +299,7 @@ jobs:
           import android.view.accessibility.AccessibilityEvent
           import android.view.accessibility.AccessibilityNodeInfo
 
-          class GuardAccessibilityService :
-              AccessibilityService() {
+          class GuardAccessibilityService : AccessibilityService() {
 
               private val browsers = setOf(
                   "com.android.chrome",
@@ -326,67 +317,47 @@ jobs:
                       event.packageName?.toString() ?: return
 
                   if (
-                      PolicyStore
-                          .blockedApps(this)
+                      PolicyStore.blockedApps(this)
                           .contains(packageName)
                   ) {
-                      performGlobalAction(
-                          GLOBAL_ACTION_HOME
-                      )
+                      performGlobalAction(GLOBAL_ACTION_HOME)
                       return
                   }
 
                   if (packageName in browsers) {
-
                       val pageText =
-                          readNode(rootInActiveWindow)
-                              .lowercase()
+                          readNode(rootInActiveWindow).lowercase()
 
                       val blocked =
-                          PolicyStore
-                              .blockedDomains(this)
+                          PolicyStore.blockedDomains(this)
 
                       if (
                           blocked.any {
-                              pageText.contains(
-                                  it.lowercase()
-                              )
+                              pageText.contains(it.lowercase())
                           }
                       ) {
-                          performGlobalAction(
-                              GLOBAL_ACTION_HOME
-                          )
+                          performGlobalAction(GLOBAL_ACTION_HOME)
                       }
                   }
 
-                  // Google Play
-                  if (
-                      packageName ==
-                      "com.android.vending"
-                  ) {
-                      performGlobalAction(
-                          GLOBAL_ACTION_HOME
-                      )
+                  if (packageName == "com.android.vending") {
+                      performGlobalAction(GLOBAL_ACTION_HOME)
                   }
               }
 
               private fun readNode(
                   node: AccessibilityNodeInfo?
               ): String {
-
                   if (node == null) return ""
 
-                  val result =
-                      StringBuilder()
+                  val result = StringBuilder()
 
                   node.text?.let {
-                      result.append(it)
-                      result.append(' ')
+                      result.append(it).append(' ')
                   }
 
                   node.contentDescription?.let {
-                      result.append(it)
-                      result.append(' ')
+                      result.append(it).append(' ')
                   }
 
                   for (i in 0 until node.childCount) {
@@ -421,53 +392,32 @@ jobs:
               private lateinit var dpm: DevicePolicyManager
               private lateinit var admin: ComponentName
 
-              override fun onCreate(
-                  savedInstanceState: Bundle?
-              ) {
+              override fun onCreate(savedInstanceState: Bundle?) {
                   super.onCreate(savedInstanceState)
 
-                  dpm =
-                      getSystemService(
-                          DevicePolicyManager::class.java
-                      )
+                  dpm = getSystemService(DevicePolicyManager::class.java)
 
-                  admin =
-                      ComponentName(
-                          this,
-                          AdminReceiver::class.java
-                      )
-
-                  val layout =
-                      LinearLayout(this)
-
-                  layout.orientation =
-                      LinearLayout.VERTICAL
-
-                  layout.setPadding(
-                      32,
-                      48,
-                      32,
-                      32
+                  admin = ComponentName(
+                      this,
+                      AdminReceiver::class.java
                   )
 
-                  val title =
-                      TextView(this)
+                  val layout = LinearLayout(this).apply {
+                      orientation = LinearLayout.VERTICAL
+                      setPadding(32, 48, 32, 32)
+                  }
 
-                  title.text =
-                      "KidGuard\nکنترل والدین"
-
-                  title.textSize = 28f
-
-                  layout.addView(title)
+                  layout.addView(TextView(this).apply {
+                      text = "KidGuard\nکنترل والدین"
+                      textSize = 28f
+                  })
 
                   addButton(
                       layout,
                       "فعال‌سازی Accessibility"
                   ) {
                       startActivity(
-                          Intent(
-                              Settings.ACTION_ACCESSIBILITY_SETTINGS
-                          )
+                          Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
                       )
                   }
 
@@ -476,9 +426,7 @@ jobs:
                       "فعال‌سازی Usage Access"
                   ) {
                       startActivity(
-                          Intent(
-                              Settings.ACTION_USAGE_ACCESS_SETTINGS
-                          )
+                          Intent(Settings.ACTION_USAGE_ACCESS_SETTINGS)
                       )
                   }
 
@@ -487,15 +435,13 @@ jobs:
                       "Device Admin"
                   ) {
                       startActivity(
-                          Intent(
-                              Settings.ACTION_SECURITY_SETTINGS
-                          )
+                          Intent(Settings.ACTION_SECURITY_SETTINGS)
                       )
                   }
 
                   addButton(
                       layout,
-                      "اعمال محدودیت‌های پایه"
+                      "اعمال محدودیت‌ها"
                   ) {
                       applyRestrictions()
                   }
@@ -508,33 +454,26 @@ jobs:
                   text: String,
                   action: () -> Unit
               ) {
-                  val button =
-                      Button(this)
-
-                  button.text = text
-
-                  button.setOnClickListener {
-                      action()
-                  }
-
-                  layout.addView(button)
+                  layout.addView(
+                      Button(this).apply {
+                          this.text = text
+                          setOnClickListener { action() }
+                      }
+                  )
               }
 
               private fun applyRestrictions() {
 
                   if (!dpm.isAdminActive(admin)) {
-
                       Toast.makeText(
                           this,
                           "ابتدا Device Admin را فعال کنید.",
                           Toast.LENGTH_LONG
                       ).show()
-
                       return
                   }
 
                   try {
-
                       dpm.addUserRestriction(
                           admin,
                           android.os.UserManager
@@ -553,10 +492,7 @@ jobs:
                           Toast.LENGTH_LONG
                       ).show()
 
-                  } catch (
-                      e: SecurityException
-                  ) {
-
+                  } catch (e: SecurityException) {
                       Toast.makeText(
                           this,
                           "برای کنترل کامل باید Device Owner باشید.",
@@ -567,21 +503,29 @@ jobs:
           }
           EOF
 
-      - name: Build APK
+      - name: Verify project
+        run: |
+          test -f settings.gradle.kts
+          test -f build.gradle.kts
+          test -f app/build.gradle.kts
+          test -f app/src/main/AndroidManifest.xml
+
+      - name: Build Debug APK
         run: gradle assembleDebug --stacktrace
 
       - name: Verify APK
         shell: bash
         run: |
           set -e
+
           APK=$(find app/build/outputs/apk/debug -name "*.apk" | head -n 1)
 
           if [ -z "$APK" ]; then
-            echo "APK was not generated."
+            echo "ERROR: APK was not generated."
             exit 1
           fi
 
-          echo "APK generated:"
+          echo "APK generated successfully:"
           echo "$APK"
 
       - name: Upload APK
